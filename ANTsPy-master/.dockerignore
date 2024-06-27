@@ -1,0 +1,10 @@
+.cirrus.yml
+.circleci/
+.github/
+appveyor/
+tutorials/
+.cleanup
+.dockerignore
+.travis.yml
+appveyor.yml
+Dockerfile

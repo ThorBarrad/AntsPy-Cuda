@@ -1,0 +1,17 @@
+#docs
+recursive-include docs *
+
+#data
+recursive-include data *
+
+#scripts
+recursive-include scripts *
+include *.sh
+
+#lib
+include ants/lib/*
+
+#misc
+include *.md
+include *.txt
+include *.so

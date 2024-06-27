@@ -1,0 +1,226 @@
+name: Build
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  build_wheels:
+    name: Build wheel for cp${{ matrix.cibw_python }}-${{ matrix.platform_id }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Have to specify python version twice so that the same python is used to build and test
+          # Need to quote decimal versions as string to avoid the "Norway problem"
+
+          # Windows 64-bit
+          - os: windows-latest
+            python: '3.7'
+            cibw_python: 37
+            platform_id: win_amd64
+          - os: windows-latest
+            python: '3.8'
+            cibw_python: 38
+            platform_id: win_amd64
+          - os: windows-latest
+            python: '3.9'
+            cibw_python: 39
+            platform_id: win_amd64
+          - os: windows-latest
+            python: '3.10'
+            cibw_python: 310
+            platform_id: win_amd64
+          - os: windows-latest
+            python: '3.11'
+            cibw_python: 311
+            platform_id: win_amd64
+
+          # Linux 64-bit
+          - os: ubuntu-latest
+            python: '3.7'
+            cibw_python: 37
+            platform_id: manylinux_x86_64
+          - os: ubuntu-latest
+            python: '3.8'
+            cibw_python: 38
+            platform_id: manylinux_x86_64
+          - os: ubuntu-latest
+            python: '3.9'
+            cibw_python: 39
+            platform_id: manylinux_x86_64
+          - os: ubuntu-latest
+            python: '3.10'
+            cibw_python: 310
+            platform_id: manylinux_x86_64
+          - os: ubuntu-latest
+            python: '3.11'
+            cibw_python: 311
+            platform_id: manylinux_x86_64
+
+          # macOS on Intel 64-bit
+          - os: macos-latest
+            python: '3.7'
+            cibw_python: 37
+            arch: x86_64
+            platform_id: macosx_x86_64
+          - os: macos-latest
+            python: '3.8'
+            cibw_python: 38
+            arch: x86_64
+            platform_id: macosx_x86_64
+          - os: macos-latest
+            python: '3.9'
+            cibw_python: 39
+            arch: x86_64
+            platform_id: macosx_x86_64
+          - os: macos-latest
+            python: '3.10'
+            cibw_python: 310
+            arch: x86_64
+            platform_id: macosx_x86_64
+          - os: macos-latest
+            python: '3.11'
+            cibw_python: 311
+            arch: x86_64
+            platform_id: macosx_x86_64
+
+          # macOS on Apple M1 64-bit
+          # - os: macos-latest
+          #   python: '3.8'
+          #   cibw_python: 38
+          #   arch: arm64
+          #   platform_id: macosx_arm64
+          # - os: macos-latest
+          #   python: '3.9'
+          #   cibw_python: 39
+          #   arch: arm64
+          #   platform_id: macosx_arm64
+          # - os: macos-latest
+          #   python: '3.10'
+          #   cibw_python: 310
+          #   arch: arm64
+          #   platform_id: macosx_arm64
+          # - os: macos-latest
+          #   python: '3.11'
+          #   cibw_python: 311
+          #   arch: arm64
+          #   platform_id: macosx_arm64
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+
+      - uses: actions/setup-python@v4
+        name: Install Python host for cibuildwheel
+        with:
+          python-version: ${{ matrix.python }}
+
+        # Visual Studio
+      - name: Set up MSVC x64
+        if: matrix.platform_id == 'win_amd64'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==2.12.1
+
+      - name: Get package name and version (Linux / Mac)
+        if: ${{ ! startsWith(matrix.os, 'windows-') }}
+        run: |
+          echo PACKAGE_NAME=$( python setup.py --name ) >> $GITHUB_ENV
+          echo PACKAGE_VERSION=$( python setup.py --version ) >> $GITHUB_ENV
+
+      # Some shells require "-Encoding utf8" to append to GITHUB_ENV
+      # https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions?tool=powershell#environment-files
+      - name: Get package name and version (Windows)
+        if: startsWith(matrix.os, 'windows-')
+        run: |
+          echo "PACKAGE_NAME=$( python setup.py --name )" | Out-File -FilePath $env:GITHUB_ENV `
+          -Append
+          echo "PACKAGE_VERSION=$( python setup.py --version )" | Out-File -FilePath $env:GITHUB_ENV `
+          -Append
+      - name: Build wheels
+        env:
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
+          CIBW_MANYLINUX_I686_IMAGE: manylinux2014
+          CIBW_BUILD: cp${{ matrix.cibw_python }}-${{ matrix.platform_id }}
+
+          # Include latest Python beta
+          CIBW_PRERELEASE_PYTHONS: True
+
+          CIBW_BEFORE_ALL_LINUX: |
+            yum install -y gcc-c++ libpng-devel libpng
+            pip install cmake ninja
+
+          CIBW_BEFORE_ALL_WINDOWS: |
+            pip install cmake ninja
+
+          CIBW_ARCHS_MACOS: ${{ matrix.arch }}
+          CIBW_BEFORE_ALL_MACOS: |
+            pip install cmake ninja
+
+          CIBW_ENVIRONMENT_MACOS: |
+            CMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
+
+        run: python -m cibuildwheel --output-dir wheelhouse/cp${{ matrix.cibw_python }}-${{matrix.platform_id }}
+
+      - name: Install and test (Linux / Mac)
+        if: ${{ ! startsWith(matrix.os, 'windows-') }}
+        run: |
+          pip install wheelhouse/cp${{ matrix.cibw_python }}-${{matrix.platform_id }}/*.whl
+          tests/run_tests.sh
+
+      - name: Install and test (Windows)
+        if: startsWith(matrix.os, 'windows-')
+        run: |
+          python -m pip install --find-links=.\wheelhouse\cp${{ matrix.cibw_python }}-${{matrix.platform_id }} antspyx
+          tests\run_tests.ps1
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.PACKAGE_NAME }}-${{ env.PACKAGE_VERSION }}-cp${{ matrix.cibw_python }}-${{ matrix.platform_id }}
+          path: ./wheelhouse/cp${{ matrix.cibw_python }}-${{ matrix.platform_id }}/*.whl
+
+      - name: Upload release asset
+        # Previously was using actions/upload-release-asset@v1 , but this had some
+        # errors with large files
+        uses: ncipollo/release-action@v1.11.1
+        if: ${{ github.event_name == 'release' }}
+        with:
+          allowUpdates: true
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
+          artifacts: ./wheelhouse/cp${{ matrix.cibw_python }}-${{ matrix.platform_id }}/*.whl
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish prep
+        if: ${{ (github.event_name == 'push') && (runner.os == 'Linux') }}
+        run: |
+          mywhl=`find ~/ -name "antspyx*.whl"`
+          extrawheeldir=`dirname $mywhl`
+          wheeldirx=`dirname $extrawheeldir`
+          wheeldir=`dirname $wheeldirx`
+          wheeldir=${wheeldir}/dist
+          mkdir -p $wheeldir
+          echo $wheeldir
+          mv $mywhl $wheeldir
+          rm -r -f $extrawheeldir $wheeldirx
+          
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
+        if: ${{ (github.event_name == 'push') && (runner.os == 'Linux') }}
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          verify_metadata: false
+          skip_existing: true
+          verbose: true
